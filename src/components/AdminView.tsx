@@ -61,6 +61,7 @@ export default function AdminView({ onDataModified }: AdminViewProps) {
 
   // Custom modal state for safe deletion without window.confirm
   const [pendingDeleteUser, setPendingDeleteUser] = useState<User | null>(null);
+  const [pendingResetStudent, setPendingResetStudent] = useState<User | null>(null);
 
   const refreshTeachersList = () => {
     const list = db.getUsers().filter(u => u.role === 'teacher');
@@ -75,11 +76,25 @@ export default function AdminView({ onDataModified }: AdminViewProps) {
   };
 
   const handleResetDevice = (studentId: string) => {
+    const student = db.getUsers().find(u => u.id === studentId);
+    if (student) {
+      setPendingResetStudent(student);
+    }
+  };
+
+  const confirmResetDevice = () => {
+    if (!pendingResetStudent) return;
+    const studentId = pendingResetStudent.id;
     const allUsers = db.getUsers();
     const updated = allUsers.map(u => u.id === studentId ? { ...u, studentDevice: undefined } : u);
     db.setUsers(updated);
     refreshStudentsList();
-    addSystemNotification('Gỡ thiết bị', 'Đã giải phóng thiết bị đăng nhập cũ của học sinh này thành công!', 'success');
+    addSystemNotification(
+      'Gỡ thiết bị', 
+      `Đã giải phóng thiết bị đăng nhập cũ của học sinh [${pendingResetStudent.fullName}] thành công!`, 
+      'success'
+    );
+    setPendingResetStudent(null);
   };
 
   const handleAddTeacher = (e: React.FormEvent) => {
@@ -1244,12 +1259,14 @@ export default function AdminView({ onDataModified }: AdminViewProps) {
                             }`}
                           >
                             <td className="py-3 px-5">
-                              <img 
-                                src={student.avatarUrl || `https://api.dicebear.com/7.x/identicon/svg?seed=${encodeURIComponent(student.fullName)}`} 
-                                alt={student.fullName}
-                                referrerPolicy="no-referrer"
-                                className="w-9 h-9 rounded-xl object-cover border border-slate-800 shadow"
-                              />
+                              <div className="w-9 h-9 rounded-xl overflow-hidden border border-slate-800 shadow shrink-0">
+                                <img 
+                                  src={student.avatarUrl || `https://api.dicebear.com/7.x/identicon/svg?seed=${encodeURIComponent(student.fullName)}`} 
+                                  alt={student.fullName}
+                                  referrerPolicy="no-referrer"
+                                  className="w-full h-full object-cover"
+                                />
+                              </div>
                             </td>
 
                             <td className="py-3.5 px-4 font-semibold text-slate-205">
@@ -1477,6 +1494,84 @@ export default function AdminView({ onDataModified }: AdminViewProps) {
                 className="flex-1 py-2.5 bg-slate-950 hover:bg-slate-850 text-slate-400 font-bold text-xs rounded-xl transition border border-slate-800 cursor-pointer uppercase tracking-wider"
               >
                 QUAY LẠI
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {pendingResetStudent && (
+        <div id="reset-device-modal" className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 font-sans">
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 max-w-md w-full shadow-2xl space-y-5 animate-fade-in text-left">
+            <div className="flex items-center gap-2.5 pb-2 border-b border-slate-800 text-amber-500">
+              <Smartphone className="w-5 h-5 text-amber-500" />
+              <h3 className="font-extrabold text-sm text-slate-100 flex-1">
+                GỠ LIÊN KẾT THIẾT BỊ
+              </h3>
+              <button 
+                onClick={() => setPendingResetStudent(null)}
+                className="p-1 hover:bg-slate-800 rounded-lg text-slate-400 hover:text-slate-200 transition cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              <p className="text-xs text-slate-300 leading-relaxed">
+                Hệ thống yêu cầu xác nhận trước khi giải phóng thiết bị liên kết của học sinh sau:
+              </p>
+              
+              <div className="bg-slate-950 p-3.5 rounded-xl border border-slate-850 flex items-center gap-3">
+                {pendingResetStudent.avatarUrl ? (
+                  <div className="w-10 h-10 rounded-xl overflow-hidden border border-slate-855 shrink-0">
+                    <img 
+                      src={pendingResetStudent.avatarUrl} 
+                      alt={pendingResetStudent.fullName}
+                      referrerPolicy="no-referrer"
+                      className="w-full h-full object-cover"
+                    />
+                  </div>
+                ) : (
+                  <div className="w-10 h-10 bg-slate-900 border border-slate-800 rounded-xl flex items-center justify-center text-[10px] text-amber-400 font-extrabold uppercase shrink-0">
+                    HS
+                  </div>
+                )}
+                <div>
+                  <h4 className="text-xs font-bold text-slate-100">
+                    {pendingResetStudent.fullName}
+                  </h4>
+                  <p className="text-[10px] text-blue-450 font-bold mb-0.5">Mã Lớp Học: {pendingResetStudent.studentClass || 'Chưa xếp lớp'}</p>
+                  <p className="text-[10px] font-mono text-slate-500">Mã Học Sinh: {pendingResetStudent.email}</p>
+                </div>
+              </div>
+
+              <div className="p-3 bg-amber-500/5 border border-amber-500/10 rounded-xl text-[10px] text-amber-400 leading-relaxed space-y-1 bg-slate-950/20">
+                <p className="font-bold flex items-center gap-1 text-xs">
+                  <span>⚠️ CẢNH BÁO LIÊN QUAN:</span>
+                </p>
+                <p>
+                  1. Tài khoản của học sinh này sẽ bị <span className="font-extrabold underline text-amber-300">BUỘC ĐĂNG XUẤT NGAY LẬP TỨC</span> khỏi tất cả các thiết bị cũ đang duy trì trạng thái đăng nhập.
+                </p>
+                <p>
+                  2. Hệ thống sẽ giải phóng khóa thiết bị. Học sinh sẽ có thể đăng nhập lại từ một thiết bị mới hoàn toàn trong lần tiếp theo.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex gap-2.5 pt-1">
+              <button
+                type="button"
+                onClick={confirmResetDevice}
+                className="flex-1 py-2.5 bg-amber-600 hover:bg-amber-500 text-slate-950 font-extrabold text-xs rounded-xl transition cursor-pointer uppercase tracking-wider"
+              >
+                XÁC NHẬN GỠ
+              </button>
+              <button
+                type="button"
+                onClick={() => setPendingResetStudent(null)}
+                className="flex-1 py-2.5 bg-slate-950 hover:bg-slate-850 text-slate-400 font-bold text-xs rounded-xl transition border border-slate-800 cursor-pointer uppercase tracking-wider"
+              >
+                HỦY BỎ
               </button>
             </div>
           </div>

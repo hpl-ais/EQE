@@ -187,15 +187,6 @@ export default function TeacherView({ teacherId, activeRoomId, onActiveRoomChang
     setSubjectsList(db.getSubjects());
   };
 
-  const handleResetDevice = (studentUserId: string) => {
-    const allUsers = db.getUsers();
-    const updated = allUsers.map(u => u.id === studentUserId ? { ...u, studentDevice: undefined } : u);
-    db.setUsers(updated);
-    addSystemNotification('Gỡ thiết bị', 'Đã giải phóng thiết bị đăng nhập cũ của học sinh thành công!', 'success');
-    onDataModified();
-    loadDbState();
-  };
-
   useEffect(() => {
     loadDbState();
     setSelectedStudentIds([]);
@@ -1970,7 +1961,6 @@ export default function TeacherView({ teacherId, activeRoomId, onActiveRoomChang
                 <th className="py-3 px-4">Ảnh đại diện</th>
                 <th className="py-3 px-4">Họ và tên</th>
                 <th className="py-3 px-4">Mã học sinh</th>
-                <th className="py-3 px-4">Thiết bị liên kết</th>
                 <th className="py-3 px-4 text-right">Tiền Vàng</th>
               </tr>
             </thead>
@@ -2006,35 +1996,17 @@ export default function TeacherView({ teacherId, activeRoomId, onActiveRoomChang
                       />
                     </td>
                     <td className="py-3.5 px-4">
-                      <img 
-                        src={student.avatarUrl || `https://api.dicebear.com/7.x/identicon/svg?seed=${student.fullName}`} 
-                        alt="" 
-                        className="w-8 h-8 rounded-full border border-slate-700 object-cover"
-                        referrerPolicy="no-referrer"
-                      />
+                      <div className="w-8 h-8 rounded-full overflow-hidden border border-slate-700 shrink-0">
+                        <img 
+                          src={student.avatarUrl || `https://api.dicebear.com/7.x/identicon/svg?seed=${student.fullName}`} 
+                          alt="" 
+                          className="w-full h-full object-cover"
+                          referrerPolicy="no-referrer"
+                        />
+                      </div>
                     </td>
                     <td className="py-3.5 px-4 font-semibold text-slate-100">{student.fullName}</td>
                     <td className="py-3.5 px-4 font-mono text-slate-400 select-all font-semibold">{student.email}</td>
-                    <td className="py-3.5 px-4 text-xs font-mono" onClick={(e) => e.stopPropagation()}>
-                      {student.studentDevice ? (
-                        <div className="flex items-center gap-1.5 text-amber-400">
-                          <Smartphone className="w-3.5 h-3.5 text-amber-500 shrink-0" />
-                          <span className="truncate max-w-[125px] inline-block font-mono font-medium text-[11px]" title={student.studentDevice}>
-                            {student.studentDevice}
-                          </span>
-                          <button
-                            type="button"
-                            onClick={() => handleResetDevice(student.studentId)}
-                            className="p-1 border border-slate-800/80 hover:bg-slate-800 rounded-lg text-slate-450 hover:text-amber-400 transition cursor-pointer shrink-0 ml-1 inline-flex items-center justify-center bg-slate-900"
-                            title="Giải phóng thiết bị đăng nhập"
-                          >
-                            <RefreshCw className="w-3 h-3" />
-                          </button>
-                        </div>
-                      ) : (
-                        <span className="text-slate-650 italic font-mono text-[10px]">Chưa kết nối</span>
-                      )}
-                    </td>
                     <td className="py-3.5 px-4 text-right font-mono text-yellow-400">{student.goldBalance} 🪙</td>
                   </tr>
                 );

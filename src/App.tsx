@@ -162,6 +162,39 @@ export default function App() {
     }
   }, [activeUser, activeRoomId]);
 
+  // Check if active student's device has been reset/de-linked by Admin/Teacher
+  useEffect(() => {
+    if (!activeUser || activeUser.role !== 'student') return;
+
+    const checkStudentDevice = () => {
+      const users = db.getUsers();
+      const dbUser = users.find(u => u.id === activeUser.id);
+      
+      if (dbUser) {
+        const currentDevice = getDeviceName();
+        // If device has been unlinked (is falsy or different), force logout
+        if (!dbUser.studentDevice || dbUser.studentDevice !== currentDevice) {
+          handleSignOut();
+          alert(
+            `⚠️ THIẾT BỊ ĐÃ BỊ CỐ GIẢI PHÓNG / GỠ LIÊN KẾT!\n\n` +
+            `Tài khoản học sinh [${dbUser.fullName}] (Lớp ${dbUser.studentClass || 'Chưa xếp lớp'}, Mã HS: ${dbUser.email}) đã được Admin/Giáo viên gỡ liên kết thiết bị cũ.\n\n` +
+            `Hệ thống tự động đăng xuất tài khoản này khỏi thiết bị cũ để cho phép đăng nhập trên thiết bị mới.`
+          );
+        }
+      } else {
+        // user no longer exists
+        handleSignOut();
+      }
+    };
+
+    // Run once on load/activeUser change
+    checkStudentDevice();
+
+    // Check periodically every 2 seconds
+    const interval = setInterval(checkStudentDevice, 2000);
+    return () => clearInterval(interval);
+  }, [activeUser, tickState]);
+
   // Automated room enrollment for students based on their class assignment
   useEffect(() => {
     if (activeUser && activeUser.role === 'student' && activeRoomId) {
