@@ -1,0 +1,6 @@
+{
+  "name": "EduQuest Engine",
+  "description": "Nền tảng quản lý lớp học game hóa với bộ não tự động hóa chấm điểm, quét phạt quá hạn, quay thưởng vòng quay may mắn và phân cấp danh hiệu bằng khung hình hoàng kim.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
