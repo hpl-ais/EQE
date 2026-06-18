@@ -219,7 +219,7 @@ export const DEFAULT_WHEEL_CONFIG: LuckyWheelItemConfig[] = [
 ];
 
 // Seed storage system keys
-const KEYS = {
+export const KEYS = {
   USERS: 'eduquest_users',
   ROOMS: 'eduquest_rooms',
   PARTICIPANTS: 'eduquest_participants',
@@ -233,6 +233,54 @@ const KEYS = {
   CLASSES: 'eduquest_classes',
   SUBJECTS: 'eduquest_subjects'
 };
+
+let hasLoadedGoogleSheetsDb = false;
+
+export function isDbSyncedWithSheets(): boolean {
+  return hasLoadedGoogleSheetsDb;
+}
+
+export function syncWithGoogleSheets(onComplete?: () => void) {
+  if (typeof window === 'undefined') return;
+  
+  fetch('/api/db/load-all')
+    .then(res => res.json())
+    .then(payload => {
+      if (payload.success && payload.database) {
+        const dbState = payload.database;
+        
+        // Map of spreadsheet keys to localStorage KEYS
+        const keyMap: Record<string, string> = {
+          users: KEYS.USERS,
+          rooms: KEYS.ROOMS,
+          participants: KEYS.PARTICIPANTS,
+          quests: KEYS.QUESTS,
+          submissions: KEYS.SUBMISSIONS,
+          inventory: KEYS.INVENTORY,
+          wheel: KEYS.WHEEL,
+          notifications: KEYS.NOTIFICATIONS,
+          classes: KEYS.CLASSES,
+          subjects: KEYS.SUBJECTS
+        };
+
+        Object.keys(keyMap).forEach(sheetKey => {
+          if (dbState[sheetKey]) {
+            localStorage.setItem(keyMap[sheetKey], JSON.stringify(dbState[sheetKey]));
+          }
+        });
+
+        hasLoadedGoogleSheetsDb = true;
+        
+        // Dispatch global sync event to trigger react view refreshers
+        window.dispatchEvent(new Event('eduquest_db_sync'));
+        
+        if (onComplete) onComplete();
+      }
+    })
+    .catch(err => {
+      console.error('Failed to sync database with Google Sheets:', err);
+    });
+}
 
 // Local storage safe parser-writers
 export function initializeStorage() {
@@ -314,6 +362,9 @@ export function initializeStorage() {
   if (!localStorage.getItem(KEYS.SUBJECTS)) {
     localStorage.setItem(KEYS.SUBJECTS, JSON.stringify([]));
   }
+
+  // Trigger automated Google Sheets load & cache override
+  syncWithGoogleSheets();
 }
 
 // Low level CRUD read / write operations simulating SQL responses
@@ -326,6 +377,40 @@ export function getData<T>(key: string): T[] {
 export function saveData<T>(key: string, data: T[]): void {
   if (typeof window === 'undefined') return;
   localStorage.setItem(key, JSON.stringify(data));
+
+  // Auto push to Google Sheet
+  const tableMap: Record<string, string> = {
+    'eduquest_users': 'users',
+    'eduquest_rooms': 'rooms',
+    'eduquest_participants': 'participants',
+    'eduquest_quests': 'quests',
+    'eduquest_submissions': 'submissions',
+    'eduquest_inventory': 'inventory',
+    'eduquest_wheel_config': 'wheel',
+    'eduquest_notifications': 'notifications',
+    'eduquest_classes': 'classes',
+    'eduquest_subjects': 'subjects'
+  };
+
+  const table = tableMap[key];
+  if (table) {
+    fetch('/api/db/save', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ table, data })
+    })
+    .then(res => res.json())
+    .then(res => {
+      if (!res.success) {
+        console.error(`Google Sheets sync fail to save table ${table}:`, res.error);
+      }
+    })
+    .catch(e => {
+      console.error(`Google Sheets sync connection failed for ${table}:`, e);
+    });
+  }
 }
 
 // High-level API utilities supporting UI changes
@@ -455,6 +540,19 @@ export const db = {
 };
 
 // Add automated system log helper
+type NotificationListener = (title: string, message: string, type: 'success' | 'warning' | 'info' | 'level_up' | 'penalty') => void;
+const notificationListeners: NotificationListener[] = [];
+
+export function subscribeToNotifications(listener: NotificationListener) {
+  notificationListeners.push(listener);
+  return () => {
+    const idx = notificationListeners.indexOf(listener);
+    if (idx !== -1) {
+      notificationListeners.splice(idx, 1);
+    }
+  };
+}
+
 export function addSystemNotification(title: string, message: string, type: 'success' | 'warning' | 'info' | 'level_up' | 'penalty') {
   const list = db.getNotifications();
   const newNot: AppNotification = {
@@ -465,6 +563,15 @@ export function addSystemNotification(title: string, message: string, type: 'suc
     type
   };
   db.setNotifications([newNot, ...list].slice(0, 40)); // keep last 40 entries
+  
+  // Notify all active React toast listeners
+  notificationListeners.forEach(listener => {
+    try {
+      listener(title, message, type);
+    } catch (e) {
+      console.error(e);
+    }
+  });
 }
 
 export function getGradeFromClass(className: string): string {

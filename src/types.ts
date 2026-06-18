@@ -66,6 +66,12 @@ export interface Quest {
   deadline: string; // ISO string
   createdAt: string;
   jointGroupId?: string;
+  // Matrix parameters
+  shuffleQuestions?: boolean;
+  shuffleOptions?: boolean;
+  maxAttempts?: number; // e.g. 1, 2, 3... undefined/0 means unlimited
+  reduceRewardOnRetry?: boolean; // if true, reduces reward by 20% on each retry
+  threeLevelGrading?: boolean; // true if 100% -> rewards, <100% -> no reward/no penalty, overdue -> penalty
 }
 
 export type SubmissionStatus = 'pending' | 'submitted' | 'passed' | 'failed';

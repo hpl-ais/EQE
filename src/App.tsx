@@ -9,11 +9,13 @@ import {
   QuestSubmission, AppNotification 
 } from './types';
 import { 
-  db, initializeStorage, addSystemNotification, getLevelInfo, generateJointRooms, getGradeFromClass
+  db, initializeStorage, addSystemNotification, getLevelInfo, generateJointRooms, getGradeFromClass,
+  subscribeToNotifications
 } from './mockData';
 import { 
   BookOpen, Shield, Flame, Terminal, LogOut, Users, Key, Lock, Eye, EyeOff, X,
-  Activity, ArrowLeftRight, Clock, HelpCircle, GraduationCap, Settings, UserCheck, Smartphone
+  Activity, ArrowLeftRight, Clock, HelpCircle, GraduationCap, Settings, UserCheck, Smartphone,
+  CheckCircle2, AlertTriangle, Info, Sparkles, Award
 } from 'lucide-react';
 import Leaderboard from './components/Leaderboard';
 import TeacherView from './components/TeacherView';
@@ -81,13 +83,36 @@ export default function App() {
     return saved !== null ? Number(saved) : 1; // Default to 1 (Thứ Hai / Monday)
   });
 
+  // Real-time animated system toasts (Tailwind stylized)
+  const [toasts, setToasts] = useState<Array<{
+    id: string;
+    title: string;
+    message: string;
+    type: 'success' | 'warning' | 'info' | 'level_up' | 'penalty';
+  }>>([]);
+
+  useEffect(() => {
+    const unsubscribe = subscribeToNotifications((title, message, type) => {
+      const id = 'toast-' + Math.random().toString(36).substr(2, 9);
+      setToasts(prev => [...prev, { id, title, message, type }]);
+      
+      // Auto-dismiss after 6.5 seconds for readability
+      const timer = setTimeout(() => {
+        setToasts(prev => prev.filter(t => t.id !== id));
+      }, 6500);
+
+      return () => clearTimeout(timer);
+    });
+    return () => unsubscribe();
+  }, []);
+
   // Initialize and check session (Remember Login)
   useEffect(() => {
     initializeStorage();
     
-    // Check if secure login session token exists in localStorage
-    const savedUserId = localStorage.getItem('eduquest_session_user_id');
-    const savedExpire = localStorage.getItem('eduquest_session_expire');
+    // Check if secure login session token exists in localStorage or sessionStorage
+    const savedUserId = localStorage.getItem('eduquest_session_user_id') || sessionStorage.getItem('eduquest_session_user_id');
+    const savedExpire = localStorage.getItem('eduquest_session_expire') || sessionStorage.getItem('eduquest_session_expire');
     
     if (savedUserId && savedExpire) {
       const now = new Date().getTime();
@@ -114,6 +139,8 @@ export default function App() {
         // Clears stale values
         localStorage.removeItem('eduquest_session_user_id');
         localStorage.removeItem('eduquest_session_expire');
+        sessionStorage.removeItem('eduquest_session_user_id');
+        sessionStorage.removeItem('eduquest_session_expire');
       }
     }
     
@@ -135,6 +162,32 @@ export default function App() {
     setNotifications(db.getNotifications());
     setTickState(prev => prev + 1);
   };
+
+  // Google Sheets DB Sync Event Listener
+  useEffect(() => {
+    const handleSync = () => {
+      // Refresh current active user reference to reflect any cloud edits
+      if (activeUser) {
+        const freshUser = db.getUsers().find(u => u.id === activeUser.id);
+        if (freshUser) {
+          setActiveUser(freshUser);
+        }
+      }
+      
+      // Force reload layouts
+      refreshData();
+      
+      // Send beautiful sync success notification
+      addSystemNotification(
+        '☁️ ĐỒNG BỘ GOOGLE SHEET THÀNH CÔNG ☁️',
+        'Toàn bộ tiến trình học tập và dữ liệu lớp học đã được đồng bộ hóa thành công với Google Sheets!',
+        'success'
+      );
+    };
+
+    window.addEventListener('eduquest_db_sync', handleSync);
+    return () => window.removeEventListener('eduquest_db_sync', handleSync);
+  }, [activeUser]);
 
   // Synchronous constraint: Auto focus class-appropriate workspace room for student/teacher
   useEffect(() => {
@@ -312,6 +365,16 @@ export default function App() {
       expireTime.setDate(expireTime.getDate() + 30); // 30-day window duration
       localStorage.setItem('eduquest_session_user_id', user.id);
       localStorage.setItem('eduquest_session_expire', expireTime.getTime().toString());
+      sessionStorage.removeItem('eduquest_session_user_id');
+      sessionStorage.removeItem('eduquest_session_expire');
+    } else {
+      // If remember status is unselected, save to sessionStorage for this tab only
+      const expireTime = new Date();
+      expireTime.setHours(expireTime.getHours() + 24); // 24 hours window
+      sessionStorage.setItem('eduquest_session_user_id', user.id);
+      sessionStorage.setItem('eduquest_session_expire', expireTime.getTime().toString());
+      localStorage.removeItem('eduquest_session_user_id');
+      localStorage.removeItem('eduquest_session_expire');
     }
 
     addSystemNotification(
@@ -328,6 +391,8 @@ export default function App() {
   const handleSignOut = () => {
     localStorage.removeItem('eduquest_session_user_id');
     localStorage.removeItem('eduquest_session_expire');
+    sessionStorage.removeItem('eduquest_session_user_id');
+    sessionStorage.removeItem('eduquest_session_expire');
     setIsAuthenticated(false);
     setActiveUser(null);
   };
@@ -1273,6 +1338,106 @@ export default function App() {
           </div>
         </div>
       )}
+
+      {/* Dynamic Floating Toast Notifications Overlay */}
+      <div id="toast-overlay" className="fixed bottom-5 right-5 z-[9999] flex flex-col gap-3 max-w-sm w-full select-none pointer-events-none">
+        {toasts.map((toast) => {
+          let borderClass = 'border-slate-800';
+          let shadowClass = 'shadow-slate-950/50';
+          let bgClass = 'bg-slate-900/95';
+          let textClass = 'text-slate-300';
+          let icon = <Info className="w-5 h-5 text-sky-400 shrink-0" />;
+          let badgeText = '';
+          let badgeClass = '';
+
+          if (toast.type === 'success') {
+            borderClass = 'border-emerald-500/30';
+            shadowClass = 'shadow-emerald-950/30';
+            bgClass = 'bg-slate-900/95';
+            textClass = 'text-slate-200';
+            icon = <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0 mt-0.5" />;
+            badgeText = 'HOÀN THÀNH';
+            badgeClass = 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20';
+          } else if (toast.type === 'level_up') {
+            borderClass = 'border-amber-400/40';
+            shadowClass = 'shadow-amber-950/40';
+            bgClass = 'bg-gradient-to-r from-slate-900 via-amber-950/10 to-slate-900';
+            textClass = 'text-amber-100';
+            icon = <Sparkles className="w-5 h-5 text-amber-300 shrink-0 mt-0.5 animate-pulse" />;
+            badgeText = 'THĂNG CẤP 🌟';
+            badgeClass = 'bg-amber-400/15 text-amber-300 border border-amber-400/30';
+          } else if (toast.type === 'penalty') {
+            borderClass = 'border-rose-500/30';
+            shadowClass = 'shadow-rose-950/30';
+            bgClass = 'bg-slate-900/95';
+            textClass = 'text-slate-200';
+            icon = <AlertTriangle className="w-5 h-5 text-rose-400 shrink-0 mt-0.5" />;
+            badgeText = 'HỆ THỐNG PHẠT';
+            badgeClass = 'bg-rose-500/10 text-rose-400 border border-rose-500/20';
+          } else if (toast.type === 'warning') {
+            borderClass = 'border-amber-500/30';
+            shadowClass = 'shadow-amber-950/20';
+            bgClass = 'bg-slate-900/95';
+            textClass = 'text-slate-200';
+            icon = <AlertTriangle className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />;
+            badgeText = 'CẢNH BÁO';
+            badgeClass = 'bg-amber-500/10 text-amber-400 border border-amber-500/20';
+          } else {
+            borderClass = 'border-sky-500/30';
+            shadowClass = 'shadow-sky-950/20';
+            bgClass = 'bg-slate-900/95';
+            textClass = 'text-slate-200';
+            icon = <Info className="w-5 h-5 text-sky-400 shrink-0 mt-0.5" />;
+            badgeText = 'THÔNG BÁO';
+            badgeClass = 'bg-sky-500/10 text-sky-400 border border-sky-500/20';
+          }
+
+          return (
+            <div 
+              key={toast.id}
+              className={`pointer-events-auto flex items-start gap-3.5 p-4 rounded-xl border ${borderClass} ${bgClass} shadow-xl ${shadowClass} animate-slide-in relative overflow-hidden group`}
+            >
+              {/* Highlight ribbon decor */}
+              <div className={`absolute top-0 left-0 h-full w-1 ${
+                toast.type === 'success' ? 'bg-emerald-500' :
+                toast.type === 'level_up' ? 'bg-amber-400' :
+                toast.type === 'penalty' ? 'bg-rose-500' :
+                toast.type === 'warning' ? 'bg-amber-500' : 'bg-sky-500'
+              }`} />
+
+              <div className="shrink-0">
+                {icon}
+              </div>
+
+              <div className="flex-1 min-w-0 pr-1">
+                <div className="flex items-center gap-2 mb-1">
+                  <span className={`text-[9px] font-bold font-mono px-1.5 py-0.5 rounded uppercase tracking-wider ${badgeClass}`}>
+                    {badgeText}
+                  </span>
+                  <p className="text-xs font-bold text-slate-100 truncate">
+                    {toast.title}
+                  </p>
+                </div>
+                <p className={`text-[11px] leading-relaxed ${textClass} break-words`}>
+                  {toast.message}
+                </p>
+              </div>
+
+              {/* Dismiss button */}
+              <button 
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setToasts(prev => prev.filter(t => t.id !== toast.id));
+                }}
+                className="shrink-0 p-1 rounded-lg text-slate-500 hover:text-slate-300 hover:bg-slate-800/50 transition cursor-pointer"
+                title="Đóng thông báo"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          );
+        })}
+      </div>
 
     </div>
   );

@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import confetti from 'canvas-confetti';
 import { 
   User, RoomParticipant, Quest, 
   QuestSubmission, InventoryItem, LuckyWheelItemConfig 
@@ -6,7 +7,7 @@ import {
 import { db, addSystemNotification, getLevelInfo } from '../mockData';
 import { 
   Award, Shield, BookOpen, Clock, AlertCircle, FileText, CheckCircle2, 
-  Gamepad2, Coins, ArrowRight, BookMarked, Sparkles, UploadCloud, Play, Gift
+  Gamepad2, Coins, ArrowRight, BookMarked, Sparkles, UploadCloud, Play, Gift, Trophy, X
 } from 'lucide-react';
 import AvatarWithFrame from './AvatarWithFrame';
 import LuckyWheel from './LuckyWheel';
@@ -24,6 +25,95 @@ export default function StudentView({ studentId, activeRoomId, onDataModified }:
   const [submissions, setSubmissions] = useState<QuestSubmission[]>([]);
   const [inventory, setInventory] = useState<InventoryItem[]>([]);
   
+  // Display Quest Completion Results Modal
+  const [questResult, setQuestResult] = useState<{
+    title: string;
+    success: boolean;
+    questType: 'quiz' | 'file' | 'voucher';
+    score?: number;
+    correctCount?: number;
+    totalCount?: number;
+    rewardXp: number;
+    rewardGold: number;
+    statusLogs: string;
+  } | null>(null);
+
+  // Celebrate level up with amazing canvas-confetti and fireworks
+  const triggerLevelUpConfetti = () => {
+    // 1. Immediate major celebratory burst
+    confetti({
+      particleCount: 140,
+      spread: 100,
+      origin: { y: 0.6 },
+      colors: ['#3b82f6', '#10b981', '#f59e0b', '#ec4899', '#8b5cf6', '#ef4444', '#14b8a6']
+    });
+
+    // 2. Continuous fireworks and shooters from sides to make the screen feel alive
+    const duration = 4.5 * 1000;
+    const end = Date.now() + duration;
+
+    const interval = setInterval(() => {
+      if (Date.now() > end) {
+        return clearInterval(interval);
+      }
+
+      // Left-shoot
+      confetti({
+        particleCount: 8,
+        angle: 60,
+        spread: 60,
+        origin: { x: 0, y: 0.8 },
+        colors: ['#3b82f6', '#8b5cf6', '#ec4899']
+      });
+
+      // Right-shoot
+      confetti({
+        particleCount: 8,
+        angle: 120,
+        spread: 60,
+        origin: { x: 1, y: 0.8 },
+        colors: ['#10b981', '#f59e0b', '#14b8a6']
+      });
+    }, 150);
+  };
+
+  // Stats changes feedback track
+  const lastXpRef = useRef<number | null>(null);
+  const lastGoldRef = useRef<number | null>(null);
+  const [xpChanges, setXpChanges] = useState<{ id: string; amount: number }[]>([]);
+  const [goldChanges, setGoldChanges] = useState<{ id: string; amount: number }[]>([]);
+
+  useEffect(() => {
+    if (participant) {
+      if (lastXpRef.current !== null && lastXpRef.current !== participant.currentXp) {
+        const diff = participant.currentXp - lastXpRef.current;
+        const changeId = 'xp-' + Math.random().toString(36).substr(2, 9);
+        setXpChanges(prev => [...prev, { id: changeId, amount: diff }]);
+        setTimeout(() => {
+          setXpChanges(prev => prev.filter(c => c.id !== changeId));
+        }, 2100);
+
+        // Check if level increased to trigger celebratory confetti
+        const oldLvl = getLevelInfo(lastXpRef.current).level;
+        const { level: newLvl } = getLevelInfo(participant.currentXp);
+        if (newLvl > oldLvl) {
+          triggerLevelUpConfetti();
+        }
+      }
+      lastXpRef.current = participant.currentXp;
+
+      if (lastGoldRef.current !== null && lastGoldRef.current !== participant.goldBalance) {
+        const diff = participant.goldBalance - lastGoldRef.current;
+        const changeId = 'gold-' + Math.random().toString(36).substr(2, 9);
+        setGoldChanges(prev => [...prev, { id: changeId, amount: diff }]);
+        setTimeout(() => {
+          setGoldChanges(prev => prev.filter(c => c.id !== changeId));
+        }, 2100);
+      }
+      lastGoldRef.current = participant.goldBalance;
+    }
+  }, [participant]);
+
   // Tab control
   const [activeTab, setActiveTab] = useState<'available' | 'completed' | 'wheel'>('available');
 
@@ -31,6 +121,17 @@ export default function StudentView({ studentId, activeRoomId, onDataModified }:
   const [activeQuizQuest, setActiveQuizQuest] = useState<Quest | null>(null);
   const [quizAnswers, setQuizAnswers] = useState<Record<string, number>>({});
   const [currentQuizStep, setCurrentQuizStep] = useState(0);
+  const [shuffledQuizQuestions, setShuffledQuizQuestions] = useState<Array<{
+    id: string;
+    questionText: string;
+    questionImage?: string;
+    options: Array<{
+      text: string;
+      originalIndex: number;
+      optionImage?: string;
+    }>;
+    originalCorrectIndex: number;
+  }>>([]);
 
   // File Upload modal/states
   const [activeFileQuest, setActiveFileQuest] = useState<Quest | null>(null);
@@ -90,19 +191,68 @@ export default function StudentView({ studentId, activeRoomId, onDataModified }:
   };
 
   const submitQuizAnswers = () => {
-    if (!activeQuizQuest || !activeQuizQuest.quizData) return;
+    if (!activeQuizQuest || shuffledQuizQuestions.length === 0) return;
 
-    const data = activeQuizQuest.quizData;
+    // Count attempts
+    const questSubs = submissions.filter(s => s.questId === activeQuizQuest.id && s.studentId === studentId);
+    const attemptCount = questSubs.length;
+
+    if (activeQuizQuest.maxAttempts && attemptCount >= activeQuizQuest.maxAttempts) {
+      alert(`Bạn đã đạt tới giới hạn tối đa ${activeQuizQuest.maxAttempts} lần làm bài cho nhiệm vụ này!`);
+      setActiveQuizQuest(null);
+      setShuffledQuizQuestions([]);
+      return;
+    }
+
     let correctCount = 0;
     
-    data.forEach(q => {
-      if (quizAnswers[q.id] === q.correctOptionIndex) {
+    shuffledQuizQuestions.forEach(q => {
+      if (quizAnswers[q.id] === q.originalCorrectIndex) {
         correctCount++;
       }
     });
 
-    const passed = correctCount === data.length; // demands full correctness for autocheck clearance
-    const calculatedScore = Math.floor((correctCount / data.length) * 100);
+    const score100Percent = correctCount === shuffledQuizQuestions.length;
+    const calculatedScore = Math.floor((correctCount / shuffledQuizQuestions.length) * 100);
+
+    // Calculate reward multipliers for retries
+    let penaltyFactor = 1;
+    if (activeQuizQuest.reduceRewardOnRetry && attemptCount > 0) {
+      penaltyFactor = Math.max(0.1, 1 - 0.2 * attemptCount); // -20% reward per retry, minimum 10%
+    }
+
+    const baseRewardXp = activeQuizQuest.rewardXp;
+    const baseRewardGold = activeQuizQuest.rewardGold;
+
+    let rewardXpApplied = 0;
+    let rewardGoldApplied = 0;
+    let isPassedOverall = false;
+    let resolvedStatus: 'passed' | 'failed' = 'failed';
+    let logsMsg = '';
+
+    if (score100Percent) {
+      rewardXpApplied = Math.floor(baseRewardXp * penaltyFactor);
+      rewardGoldApplied = Math.floor(baseRewardGold * penaltyFactor);
+      isPassedOverall = true;
+      resolvedStatus = 'passed';
+      logsMsg = `Chấm điểm tự động: Đúng 100% (${correctCount}/${shuffledQuizQuestions.length} câu). Nhận phần thưởng: ${rewardXpApplied} XP & ${rewardGoldApplied} Vàng (Lần làm bài thứ ${attemptCount + 1}${penaltyFactor < 1 ? `, giảm ${Math.round((1 - penaltyFactor) * 100)}% do nộp lại` : ''}).`;
+    } else {
+      if (activeQuizQuest.threeLevelGrading) {
+        // Three level grading: correct < 100% -> PASSED but NO reward/penalty
+        rewardXpApplied = 0;
+        rewardGoldApplied = 0;
+        isPassedOverall = true;
+        resolvedStatus = 'passed';
+        logsMsg = `Thang điểm 3 mức: Đúng ${correctCount}/${shuffledQuizQuestions.length} câu (${calculatedScore}/100đ). Bài làm Đạt (Passed) để tránh phạt quá hạn, không nhận thưởng và không bị phạt.`;
+      } else {
+        // Regular quest: fail
+        rewardXpApplied = 0;
+        rewardGoldApplied = 0;
+        isPassedOverall = false;
+        resolvedStatus = 'failed';
+        logsMsg = `Chấm điểm tự động: Đúng ${correctCount}/${shuffledQuizQuestions.length} câu (${calculatedScore}/100đ). Thử thách yêu cầu đạt 100/100đ để hoàn thành. Trạng thái Thất Bại!`;
+      }
+    }
 
     // Save submission status
     const allSubs = db.getSubmissions();
@@ -111,26 +261,26 @@ export default function StudentView({ studentId, activeRoomId, onDataModified }:
       questId: activeQuizQuest.id,
       studentId: studentId,
       submissionValue: JSON.stringify(quizAnswers),
-      status: passed ? 'passed' : 'failed',
+      status: resolvedStatus,
       isVoucherUsed: false,
       submittedAt: new Date().toISOString(),
       gradedAt: new Date().toISOString(),
-      statusLogs: `Chấm điểm tự động: Đúng ${correctCount}/${data.length} câu (${calculatedScore}/100đ). ${passed ? 'Hợp lệ vượt qua!' : 'Một số câu trả lời bị sai, trạng thái Thất bại.'}`
+      statusLogs: logsMsg
     };
 
     db.setSubmissions([...allSubs, newSub]);
 
     // Apply auto rewards immediately if passed!
-    if (passed && participant) {
+    if (isPassedOverall && participant) {
       const allParts = db.getParticipants();
       const pIdx = allParts.findIndex(p => p.studentId === studentId && p.roomId === activeRoomId);
       
       if (pIdx !== -1) {
         const oldXp = allParts[pIdx].currentXp;
-        const newXp = oldXp + activeQuizQuest.rewardXp;
+        const newXp = oldXp + rewardXpApplied;
         
         allParts[pIdx].currentXp = newXp;
-        allParts[pIdx].goldBalance += activeQuizQuest.rewardGold;
+        allParts[pIdx].goldBalance += rewardGoldApplied;
 
         // Auto Level up check!
         const oldLvl = allParts[pIdx].currentLevel;
@@ -151,18 +301,25 @@ export default function StudentView({ studentId, activeRoomId, onDataModified }:
           );
           playSfx(880, 'sine', 0.4);
         } else {
-          // simple success
-          playSfx(523, 'sine', 0.2);
+          playSfx(rewardXpApplied > 0 ? 523 : 392, 'sine', 0.2);
         }
 
         db.setParticipants(allParts);
       }
 
-      addSystemNotification(
-        'Hoàn thành bài tập',
-        `Học sinh [${studentUser?.fullName}] đã làm đúng trắc nghiệm tự động của nhiệm vụ "${activeQuizQuest.title}". Nhận thưởng +${activeQuizQuest.rewardXp} XP!`,
-        'success'
-      );
+      if (rewardXpApplied > 0) {
+        addSystemNotification(
+          'Hoàn thành bài tập',
+          `Học sinh [${studentUser?.fullName}] đã hoàn tất trắc nghiệm "${activeQuizQuest.title}" đạt 100%. Nhận thưởng +${rewardXpApplied} XP!`,
+          'success'
+        );
+      } else {
+        addSystemNotification(
+          'Đạt nhiệm vụ trắc nghiệm',
+          `Học sinh [${studentUser?.fullName}] đã hoàn thành "${activeQuizQuest.title}" với thang điểm 3 mức. Trạng thái: Đạt (Không thưởng, Không phạt).`,
+          'info'
+        );
+      }
     } else {
       // Quiz Failed
       playSfx(220, 'square', 0.25);
@@ -173,8 +330,21 @@ export default function StudentView({ studentId, activeRoomId, onDataModified }:
       );
     }
 
+    setQuestResult({
+      title: activeQuizQuest.title,
+      success: isPassedOverall,
+      questType: 'quiz',
+      score: calculatedScore,
+      correctCount: correctCount,
+      totalCount: shuffledQuizQuestions.length,
+      rewardXp: rewardXpApplied,
+      rewardGold: rewardGoldApplied,
+      statusLogs: logsMsg
+    });
+
     // cleanup
     setActiveQuizQuest(null);
+    setShuffledQuizQuestions([]);
     setQuizAnswers({});
     setCurrentQuizStep(0);
     onDataModified();
@@ -214,6 +384,17 @@ export default function StudentView({ studentId, activeRoomId, onDataModified }:
   const submitFileChallenge = () => {
     if (!activeFileQuest || !droppedFile) return;
 
+    // Count attempts
+    const questSubs = submissions.filter(s => s.questId === activeFileQuest.id && s.studentId === studentId);
+    const attemptCount = questSubs.length;
+
+    if (activeFileQuest.maxAttempts && attemptCount >= activeFileQuest.maxAttempts) {
+      alert(`Bạn đã đạt tới giới hạn tối đa ${activeFileQuest.maxAttempts} lần nộp bài cho nhiệm vụ này!`);
+      setActiveFileQuest(null);
+      setDroppedFile(null);
+      return;
+    }
+
     const allSubs = db.getSubmissions();
     const newSub: QuestSubmission = {
       id: 'sub-' + Math.random().toString(36).substr(2, 9),
@@ -223,7 +404,7 @@ export default function StudentView({ studentId, activeRoomId, onDataModified }:
       status: 'submitted', // needs teachers manual review but awards standard pending
       isVoucherUsed: false,
       submittedAt: new Date().toISOString(),
-      statusLogs: `Đã nộp tệp vẽ/ảnh: "${droppedFile.name}" thành công lúc ${new Date().toLocaleTimeString()}. Đang chờ giáo viên rà soát duyệt duyệt.`
+      statusLogs: `Đã nộp tệp vẽ/ảnh (Lượt ${attemptCount + 1}): "${droppedFile.name}" thành công lúc ${new Date().toLocaleTimeString()}. Đang chờ giáo viên rà soát duyệt duyệt.`
     };
 
     db.setSubmissions([...allSubs, newSub]);
@@ -236,6 +417,15 @@ export default function StudentView({ studentId, activeRoomId, onDataModified }:
       `Bạn đã nộp tệp "${droppedFile.name}" thành công cho bài "${activeFileQuest.title}".`,
       'info'
     );
+
+    setQuestResult({
+      title: activeFileQuest.title,
+      success: true,
+      questType: 'file',
+      rewardXp: 0,
+      rewardGold: 0,
+      statusLogs: `Đã nộp tệp "${droppedFile.name}" thành công! Thử thách đã được chuyển sang trạng thái chờ Giáo viên kiểm duyệt. Khi được duyệt đạt, tài nguyên XP (+${activeFileQuest.rewardXp} XP) và Vàng (+${activeFileQuest.rewardGold} vàng) sẽ được tự động cộng vào nhân vật của bạn.`
+    });
 
     setActiveFileQuest(null);
     setDroppedFile(null);
@@ -325,6 +515,15 @@ export default function StudentView({ studentId, activeRoomId, onDataModified }:
     setTimeout(() => playSfx(659.25, 'sine', 0.2), 100);
     setTimeout(() => playSfx(783.99, 'sine', 0.3), 200);
 
+    setQuestResult({
+      title: quest.title,
+      success: true,
+      questType: 'voucher',
+      rewardXp: quest.rewardXp,
+      rewardGold: quest.rewardGold,
+      statusLogs: `Đã dùng thành công [Thẻ Miễn Bài Tập] cho thử thách "${quest.title}". Hệ thống đặc cách duyệt đạt tự động thành công (Passed)! Bạn đã được nhận ngay phần thưởng tài nguyên trọn vẹn.`
+    });
+
     // cleanup
     setActiveFileQuest(null);
     onDataModified();
@@ -412,7 +611,21 @@ export default function StudentView({ studentId, activeRoomId, onDataModified }:
                 <span className="text-[10px] uppercase font-mono font-bold tracking-wider text-cyan-400">HỒ SƠ KHÁNH GIẢ</span>
                 <h2 className="text-xl font-black text-white">{studentUser?.fullName}</h2>
               </div>
-              <div className="flex items-center justify-center md:justify-end gap-3 mt-1 md:mt-0 bg-slate-950/70 border border-slate-800/80 px-4 py-1.5 rounded-2xl">
+              <div className="flex items-center justify-center md:justify-end gap-3 mt-1 md:mt-0 bg-slate-950/70 border border-slate-800/80 px-4 py-1.5 rounded-2xl relative">
+                {/* Floating Gold Changes */}
+                {goldChanges.map(change => (
+                  <span 
+                    key={change.id} 
+                    className={`absolute -top-7 left-3 font-mono font-black text-[10px] px-2 py-0.5 rounded-md border shadow-lg flex items-center gap-0.5 pointer-events-none z-30 animate-float-up ${
+                      change.amount > 0 
+                        ? 'bg-emerald-950/90 text-emerald-400 border-emerald-500/30' 
+                        : 'bg-rose-950/90 text-rose-400 border-rose-500/30'
+                    }`}
+                  >
+                    {change.amount > 0 ? `+${change.amount}` : change.amount} 🪙
+                  </span>
+                ))}
+                
                 <div className="flex items-center gap-1 font-mono text-xs text-yellow-400 font-bold" title="Tiền vàng mua sắm đổi thẻ">
                   <Coins className="w-4 h-4 text-yellow-500" />
                   <span>{participant.goldBalance} vàng</span>
@@ -434,7 +647,21 @@ export default function StudentView({ studentId, activeRoomId, onDataModified }:
             </div>
 
             {/* Level progress bar */}
-            <div className="space-y-1">
+            <div className="space-y-1 relative">
+              {/* Floating XP Changes */}
+              {xpChanges.map(change => (
+                <span 
+                  key={change.id} 
+                  className={`absolute -top-5 right-6 font-mono font-black text-[10px] px-2 py-0.5 rounded-md border shadow-lg flex items-center gap-0.5 pointer-events-none z-30 animate-float-up ${
+                    change.amount > 0 
+                      ? 'bg-blue-950/90 text-blue-450 border-blue-500/30' 
+                      : 'bg-rose-950/90 text-rose-400 border-rose-500/30'
+                  }`}
+                >
+                  {change.amount > 0 ? `+${change.amount}` : change.amount} XP ✨
+                </span>
+              ))}
+
               <div className="flex items-center justify-between text-[11px] text-slate-400 font-mono">
                 <span>Cấp {level}</span>
                 <span>{participant.currentXp} / {nextLevelXp} XP</span>
@@ -516,21 +743,56 @@ export default function StudentView({ studentId, activeRoomId, onDataModified }:
                 const sub = submissions.find(s => s.questId === quest.id);
                 const hasPendingReview = sub && sub.status === 'submitted';
                 
+                const now = new Date();
+                const deadlineDateObj = new Date(quest.deadline);
+                const diffMs = deadlineDateObj.getTime() - now.getTime();
+                const diffHours = diffMs / (1000 * 60 * 60);
+
+                let cardBorderClass = 'border-slate-800 hover:border-slate-700 bg-slate-900';
+                let deadlineColorClass = 'text-slate-300';
+                let warningText = '';
+                let warningBadge = null;
+
+                if (diffHours > 0 && diffHours <= 24) {
+                  if (diffHours <= 12) {
+                    cardBorderClass = 'border-rose-500/40 bg-rose-950/20 shadow-lg shadow-rose-950/10 hover:border-rose-500/55';
+                    deadlineColorClass = 'text-rose-400 font-bold';
+                    warningText = `Còn ${Math.ceil(diffHours)} giờ`;
+                    warningBadge = (
+                      <span className="px-2 py-0.5 text-[9px] font-bold rounded-full border bg-rose-500/15 text-rose-400 border-rose-500/30 flex items-center gap-1 animate-pulse uppercase">
+                        <AlertCircle className="w-3 h-3 text-rose-500 shrink-0" /> Dưới 12g
+                      </span>
+                    );
+                  } else {
+                    cardBorderClass = 'border-amber-500/40 bg-amber-950/10 shadow-lg shadow-amber-950/10 hover:border-amber-500/50';
+                    deadlineColorClass = 'text-amber-400 font-bold';
+                    warningText = `Còn ${Math.ceil(diffHours)} giờ`;
+                    warningBadge = (
+                      <span className="px-2 py-0.5 text-[9px] font-bold rounded-full border bg-amber-500/15 text-amber-400 border-amber-500/30 flex items-center gap-1 uppercase">
+                        <Clock className="w-3 h-3 text-amber-500 shrink-0" /> Dưới 24g
+                      </span>
+                    );
+                  }
+                }
+
                 return (
                   <div 
                     key={quest.id}
-                    className="p-5 bg-slate-900 border border-slate-800 rounded-2xl hover:border-slate-700 transition duration-300 space-y-4 relative"
+                    className={`p-5 rounded-2xl transition duration-300 space-y-4 relative border ${cardBorderClass}`}
                   >
                     {/* Badge rewards top */}
                     <div className="flex justify-between items-start gap-4">
                       <div>
-                        <span className={`px-2 py-0.5 text-[9px] font-bold rounded-full border uppercase ${
-                          quest.questType === 'quiz' 
-                            ? 'bg-cyan-500/10 text-cyan-400 border-cyan-500/20' 
-                            : 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
-                        }`}>
-                          {quest.questType === 'quiz' ? 'Trắc nghiệm tự chấm' : 'Nộp ảnh bài tập'}
-                        </span>
+                        <div className="flex flex-wrap gap-1.5 items-center">
+                          <span className={`px-2 py-0.5 text-[9px] font-bold rounded-full border uppercase ${
+                            quest.questType === 'quiz' 
+                              ? 'bg-cyan-500/10 text-cyan-400 border-cyan-500/20' 
+                              : 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
+                          }`}>
+                            {quest.questType === 'quiz' ? 'Trắc nghiệm tự chấm' : 'Nộp ảnh bài tập'}
+                          </span>
+                          {warningBadge}
+                        </div>
                         <h3 className="font-bold text-slate-100 text-sm mt-1.5">{quest.title}</h3>
                       </div>
 
@@ -545,14 +807,52 @@ export default function StudentView({ studentId, activeRoomId, onDataModified }:
 
                     <p className="text-xs text-slate-400 leading-relaxed font-sans">{quest.description}</p>
 
+                    {/* Advanced Configuration Badges */}
+                    {(() => {
+                      const localAttempts = submissions.filter(s => s.questId === quest.id && s.studentId === studentId).length;
+                      const hasBadges = quest.maxAttempts || quest.reduceRewardOnRetry || quest.threeLevelGrading;
+                      if (!hasBadges) return null;
+                      return (
+                        <div className="flex flex-wrap gap-2 p-2.5 bg-slate-950/50 rounded-xl border border-slate-850/80 text-[10px] items-center">
+                          <span className="text-[9px] font-bold text-slate-500 uppercase tracking-wide">Quy tắc:</span>
+                          
+                          {quest.maxAttempts !== undefined && (
+                            <span className={`px-2 py-0.5 rounded-md font-bold text-[9px] border ${localAttempts >= quest.maxAttempts ? 'bg-rose-500/10 text-rose-400 border-rose-500/20' : 'bg-slate-900 border-slate-800 text-slate-300'}`}>
+                              Lượt đã làm: {localAttempts}/{quest.maxAttempts}
+                            </span>
+                          )}
+
+                          {quest.reduceRewardOnRetry && (
+                            <span className="px-2 py-0.5 rounded-md bg-amber-500/10 text-amber-400 border border-amber-500/20 font-medium text-[9px]">
+                              {localAttempts > 0 
+                                ? `Hệ số thưởng: -${Math.round((1 - Math.max(0.1, 1 - 0.2 * localAttempts)) * 100)}% điểm nộp lại`
+                                : 'Làm lại: -20% điểm/lần'
+                              }
+                            </span>
+                          )}
+
+                          {quest.threeLevelGrading && (
+                            <span className="px-2 py-0.5 rounded-md bg-teal-500/10 text-teal-400 border border-teal-500/20 font-medium text-[9px] font-mono" title="Đúng 100% -> Thưởng | Đúng < 100% -> Passed không thưởng phạt | Quá hạn -> Phạt">
+                              🛡️ Thang điểm 3 mức
+                            </span>
+                          )}
+                        </div>
+                      );
+                    })()}
+
                     {/* Deadline block with automated warning details */}
                     <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center pt-3 border-t border-slate-800 text-[11px] text-slate-400 gap-2">
                       <span className="flex items-center gap-1">
                         <Clock className="w-3.5 h-3.5 text-slate-500" />
-                        Hạn nộp: <strong className="text-slate-300">{new Date(quest.deadline).toLocaleDateString()} lúc 23:59</strong>
+                        Hạn nộp: <strong className={deadlineColorClass}>{new Date(quest.deadline).toLocaleDateString()} lúc 23:59</strong>
+                        {warningText && (
+                          <span className={`ml-1 font-bold ${diffHours <= 12 ? 'text-rose-400 animate-pulse' : 'text-amber-400'}`}>
+                            ({warningText})
+                          </span>
+                        )}
                       </span>
                       {quest.penaltyXp > 0 && (
-                        <span className="text-rose-400 flex items-center gap-0.5" title="Hệ thống tự trừ XP lúc nửa đêm nếu chưa làm khi quá hạn">
+                        <span className="text-rose-400 flex items-center gap-0.5" title="Hệ thống tự trừ XP lúc nửa đêm nếu chưa làm khi quá hạn font-sans">
                           <AlertCircle className="w-3.5 h-3.5" /> Phạt quá hạn: -{quest.penaltyXp} XP (Tự quét 00:00)
                         </span>
                       )}
@@ -576,8 +876,42 @@ export default function StudentView({ studentId, activeRoomId, onDataModified }:
                       {quest.questType === 'quiz' ? (
                         <button
                           onClick={() => {
+                            const shuffleArray = <T,>(arr: T[]): T[] => {
+                              const copy = [...arr];
+                              for (let i = copy.length - 1; i > 0; i--) {
+                                const j = Math.floor(Math.random() * (i + 1));
+                                [copy[i], copy[j]] = [copy[j], copy[i]];
+                              }
+                              return copy;
+                            };
+
+                            let questionsToUse = quest.quizData ? [...quest.quizData] : [];
+                            if (quest.shuffleQuestions) {
+                              questionsToUse = shuffleArray(questionsToUse);
+                            }
+
+                            const prepared = questionsToUse.map(q => {
+                              let mappedOpts = q.options.map((text, idx) => ({
+                                text,
+                                originalIndex: idx,
+                                optionImage: q.optionImages?.[idx]
+                              }));
+                              if (quest.shuffleOptions) {
+                                mappedOpts = shuffleArray(mappedOpts);
+                              }
+                              return {
+                                id: q.id,
+                                questionText: q.questionText,
+                                questionImage: q.questionImage,
+                                options: mappedOpts,
+                                originalCorrectIndex: q.correctOptionIndex
+                              };
+                            });
+
+                            setShuffledQuizQuestions(prepared);
                             setActiveQuizQuest(quest);
                             setQuizAnswers({});
+                            setCurrentQuizStep(0);
                           }}
                           className="px-4.5 py-2 bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-bold rounded-xl select-none flex items-center gap-1 transition shadow hover:shadow-cyan-500/10"
                         >
@@ -789,7 +1123,7 @@ export default function StudentView({ studentId, activeRoomId, onDataModified }:
       </div>
 
       {/* ACTIVE QUIZ MODAL TAKING CHALLENGE */}
-      {activeQuizQuest && activeQuizQuest.quizData && (
+      {activeQuizQuest && shuffledQuizQuestions.length > 0 && (
         <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-fade-in select-none">
           <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 max-w-lg w-full relative space-y-6">
             
@@ -800,7 +1134,7 @@ export default function StudentView({ studentId, activeRoomId, onDataModified }:
 
             {/* Quiz Step tracker bar */}
             <div className="flex gap-1 h-1.5 w-full bg-slate-950 rounded-full overflow-hidden">
-              {activeQuizQuest.quizData.map((_, i) => (
+              {shuffledQuizQuestions.map((_, i) => (
                 <div 
                   key={i} 
                   className={`h-full flex-1 transition ${
@@ -813,15 +1147,15 @@ export default function StudentView({ studentId, activeRoomId, onDataModified }:
             {/* Question Text */}
             <div className="space-y-4">
               <p className="text-xs font-bold text-slate-400 font-mono">
-                CÂU HỎI {currentQuizStep + 1} / {activeQuizQuest.quizData.length}
+                CÂU HỎI {currentQuizStep + 1} / {shuffledQuizQuestions.length}
               </p>
               <p className="text-sm font-semibold text-slate-100 italic">
-                " {activeQuizQuest.quizData[currentQuizStep].questionText} "
+                " {shuffledQuizQuestions[currentQuizStep].questionText} "
               </p>
-              {activeQuizQuest.quizData[currentQuizStep].questionImage && (
+              {shuffledQuizQuestions[currentQuizStep].questionImage && (
                 <div className="mt-2 flex justify-center bg-slate-950/40 p-2.5 rounded-xl border border-slate-850">
                   <img 
-                    src={activeQuizQuest.quizData[currentQuizStep].questionImage} 
+                    src={shuffledQuizQuestions[currentQuizStep].questionImage} 
                     className="max-h-48 rounded-lg object-contain" 
                     referrerPolicy="no-referrer" 
                     alt="Question visual"
@@ -832,15 +1166,15 @@ export default function StudentView({ studentId, activeRoomId, onDataModified }:
 
             {/* Radio Options Grid */}
             <div className="grid grid-cols-1 gap-2.5">
-              {activeQuizQuest.quizData[currentQuizStep].options.map((opt, optIdx) => {
-                const qId = activeQuizQuest.quizData![currentQuizStep].id;
-                const isSelected = quizAnswers[qId] === optIdx;
-                const optImage = activeQuizQuest.quizData![currentQuizStep].optionImages?.[optIdx];
+              {shuffledQuizQuestions[currentQuizStep].options.map((optObj, optIdx) => {
+                const qId = shuffledQuizQuestions[currentQuizStep].id;
+                const isSelected = quizAnswers[qId] === optObj.originalIndex;
+                const optImage = optObj.optionImage;
 
                 return (
                   <button
                     key={optIdx}
-                    onClick={() => handleAnswerSelect(qId, optIdx)}
+                    onClick={() => handleAnswerSelect(qId, optObj.originalIndex)}
                     className={`text-left p-3.5 rounded-xl text-xs font-medium transition flex items-center gap-3 border ${
                       isSelected 
                         ? 'bg-cyan-500/10 text-cyan-300 border-cyan-500/50 shadow-sm shadow-cyan-400/5' 
@@ -855,7 +1189,7 @@ export default function StudentView({ studentId, activeRoomId, onDataModified }:
                       {String.fromCharCode(65 + optIdx)}
                     </span>
                     <div className="flex-1 flex items-center justify-between gap-3">
-                      <span>{opt}</span>
+                      <span>{optObj.text}</span>
                       {optImage && (
                         <img 
                           src={optImage} 
@@ -873,7 +1207,10 @@ export default function StudentView({ studentId, activeRoomId, onDataModified }:
             {/* Footer switcher steps */}
             <div className="flex justify-between items-center pt-4 border-t border-slate-800">
               <button
-                onClick={() => setActiveQuizQuest(null)}
+                onClick={() => {
+                  setActiveQuizQuest(null);
+                  setShuffledQuizQuestions([]);
+                }}
                 className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-semibold transition"
               >
                 Thoát bài nộp
@@ -883,16 +1220,16 @@ export default function StudentView({ studentId, activeRoomId, onDataModified }:
                 {currentQuizStep > 0 && (
                   <button
                     onClick={() => setCurrentQuizStep(currentQuizStep - 1)}
-                    className="px-4 py-2 bg-slate-850 hover:bg-slate-800 text-slate-300 rounded-xl text-xs font-semibold transition"
+                    className="px-4 py-2 bg-slate-855 hover:bg-slate-800 text-slate-300 rounded-xl text-xs font-semibold transition"
                   >
                     Quay lại
                   </button>
                 )}
 
-                {currentQuizStep < activeQuizQuest.quizData.length - 1 ? (
+                {currentQuizStep < shuffledQuizQuestions.length - 1 ? (
                   <button
                     onClick={() => setCurrentQuizStep(currentQuizStep + 1)}
-                    disabled={quizAnswers[activeQuizQuest.quizData![currentQuizStep].id] === undefined}
+                    disabled={quizAnswers[shuffledQuizQuestions[currentQuizStep].id] === undefined}
                     className="px-5.5 py-2 bg-cyan-600 hover:bg-cyan-500 disabled:bg-slate-800 disabled:text-slate-500 text-white rounded-xl text-xs font-bold transition inline-flex items-center gap-1"
                   >
                     Trang tiếp
@@ -900,7 +1237,7 @@ export default function StudentView({ studentId, activeRoomId, onDataModified }:
                 ) : (
                   <button
                     onClick={submitQuizAnswers}
-                    disabled={quizAnswers[activeQuizQuest.quizData![currentQuizStep].id] === undefined}
+                    disabled={quizAnswers[shuffledQuizQuestions[currentQuizStep].id] === undefined}
                     className="px-5.5 py-2 bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-800 disabled:text-slate-500 text-white rounded-xl text-xs font-bold transition inline-flex items-center gap-1.5 uppercase tracking-wide"
                   >
                     <CheckCircle2 className="w-4 h-4" /> Nộp Bài Châm Điểm
@@ -983,6 +1320,119 @@ export default function StudentView({ studentId, activeRoomId, onDataModified }:
                 className="px-5 py-2 bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-800 disabled:text-slate-500 text-white text-xs font-bold rounded-xl transition flex items-center gap-1 uppercase tracking-wide"
               >
                 <CheckCircle2 className="w-4 h-4" /> Nộp bài tập
+              </button>
+            </div>
+
+          </div>
+        </div>
+      )}
+
+      {/* QUEST RESULT DETAILED OVERLAY DISPLAY MODAL */}
+      {questResult && (
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-fade-in">
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 max-w-sm w-full relative space-y-5 text-center shadow-2xl">
+            
+            {/* Close small cross top-right */}
+            <button 
+              onClick={() => setQuestResult(null)}
+              className="absolute top-4 right-4 text-slate-500 hover:text-slate-300 transition"
+              title="Đóng"
+            >
+              <X className="w-4 h-4" />
+            </button>
+
+            {/* Glowing Icon Banner */}
+            <div className="flex justify-center pt-2">
+              <div className={`w-14 h-14 rounded-full flex items-center justify-center border ${
+                questResult.success 
+                  ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' 
+                  : 'bg-rose-500/10 text-rose-400 border-rose-500/20'
+              }`}>
+                {questResult.success ? (
+                  questResult.questType === 'voucher' ? (
+                    <Sparkles className="w-7 h-7 text-yellow-400 animate-pulse" />
+                  ) : (
+                    <Trophy className="w-7 h-7 text-emerald-400" />
+                  )
+                ) : (
+                  <AlertCircle className="w-7 h-7 text-rose-500" />
+                )}
+              </div>
+            </div>
+
+            {/* Quest Header */}
+            <div>
+              <span className={`text-[9px] uppercase font-mono font-bold tracking-widest ${
+                questResult.success ? 'text-emerald-400' : 'text-rose-400'
+              }`}>
+                {questResult.success 
+                  ? (questResult.questType === 'voucher' ? 'MIỄN BÀI TẬP THÀNH CÔNG' : 'HOÀN THÀNH NHIỆM VỤ') 
+                  : 'CHƯA ĐẠT ĐIỂM TỐI ĐA'}
+              </span>
+              <h3 className="font-bold text-slate-100 text-md mt-1 leading-snug">
+                {questResult.title}
+              </h3>
+            </div>
+
+            {/* Score Display if Quiz */}
+            {questResult.questType === 'quiz' && (
+              <div className="space-y-2 bg-slate-950/60 p-3.5 rounded-2xl border border-slate-850 text-left">
+                <div className="flex justify-between items-center text-xs font-semibold">
+                  <span className="text-slate-400 font-sans">Điểm trắc nghiệm:</span>
+                  <span className={questResult.success ? 'text-emerald-400 font-bold' : 'text-rose-400 font-bold'}>
+                    {questResult.score} / 100đ
+                  </span>
+                </div>
+                <div className="flex justify-between items-center text-[10px] text-slate-500 font-mono">
+                  <span>Số câu chính xác:</span>
+                  <span>{questResult.correctCount} / {questResult.totalCount} câu</span>
+                </div>
+                {/* Visual mini progress bar for quiz correctness */}
+                <div className="h-1.5 w-full bg-slate-900 rounded-full overflow-hidden">
+                  <div 
+                    className={`h-full rounded-full transition-all duration-300 ${questResult.success ? 'bg-emerald-500' : 'bg-rose-500'}`}
+                    style={{ width: `${questResult.score}%` }}
+                  />
+                </div>
+              </div>
+            )}
+
+            {/* Explanation Logs */}
+            <p className="text-xs text-slate-300 font-sans leading-relaxed px-1">
+              {questResult.statusLogs}
+            </p>
+
+            {/* Gained Rewards cards */}
+            {questResult.success && (questResult.rewardXp > 0 || questResult.rewardGold > 0) && (
+              <div className="grid grid-cols-2 gap-3" id="quest-result-rewards">
+                {questResult.rewardXp > 0 && (
+                  <div className="p-2.5 bg-blue-950/20 border border-blue-500/20 rounded-xl flex flex-col items-center justify-center gap-0.5">
+                    <span className="text-[9px] text-blue-450 uppercase tracking-wider font-mono">Kinh nghiệm</span>
+                    <span className="font-bold text-blue-400 text-sm">+{questResult.rewardXp} XP</span>
+                  </div>
+                )}
+                {questResult.rewardGold > 0 && (
+                  <div className="p-2.5 bg-yellow-950/20 border border-yellow-500/20 rounded-xl flex flex-col items-center justify-center gap-0.5">
+                    <span className="text-[9px] text-yellow-500 uppercase tracking-wider font-mono">Phần thưởng</span>
+                    <span className="font-bold text-yellow-400 text-sm flex items-center gap-1">
+                      +{questResult.rewardGold} <Coins className="w-3.5 h-3.5 text-yellow-500 inline" />
+                    </span>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Action button */}
+            <div className="pt-1.5">
+              <button
+                onClick={() => setQuestResult(null)}
+                className={`w-full py-2.5 rounded-xl font-bold text-xs uppercase tracking-wider transition cursor-pointer select-none ${
+                  questResult.success 
+                    ? 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-md' 
+                    : 'bg-slate-800 hover:bg-slate-700 text-slate-200'
+                }`}
+              >
+                {questResult.success ? 'Xác nhận & Tiếp tục' : 'Đóng & Thử lại sau'}
               </button>
             </div>
 
