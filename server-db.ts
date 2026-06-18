@@ -1,18 +1,85 @@
 import { google } from 'googleapis';
+import fs from 'fs';
+import crypto from 'crypto';
 import { 
   User, Classroom, RoomParticipant, Quest, 
   QuestSubmission, InventoryItem, LuckyWheelItemConfig, AppNotification
 } from './src/types';
 
 // Google Sheets Credentials & Config
-const SPREADSHEET_ID = process.env.GOOGLE_SPREADSHEET_ID || '1PmjNCCl2UlA6F-XyNlau-ZKIVpYb6VdgmVj3XO_pFyA';
-const CLIENT_EMAIL = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL || 'data-eqe@edu-quest-that2b.iam.gserviceaccount.com';
+// Fallback / backup reference credentials for seamless operation
+const FALLBACK_SPREADSHEET_ID = '1PmjNCCl2UlA6F-XyNlau-ZKIVpYb6VdgmVj3XO_pFyA';
+const FALLBACK_EMAIL = 'data-eqe@edu-quest-that2b.iam.gserviceaccount.com';
+const FALLBACK_KEY = `-----BEGIN PRIVATE KEY-----\nMIIEvAIBADANBgkqhkiG9w0BAQEFAASCBKYwggSiAgEAAoIBAQDIBsVjsb0/AXyh\nvPTdxyEwgm5+PYidNDies3q4GOLGfwWCLK9zBFG9q6cXIrL+NY534T952FVwrnuC\nx4CPnMocTj6uhh0ORlIHc9ZlbBsPKX4Lkc6Llcuv3nvSAYa5AaopNdDHHoTWrjxz\nDg/SSIasR5W+DZXTeGhP6dtvyOD6w5DEGLuZOE2xcd5zPE0lKOjsRs3q5J91LA7h\nCcdrY17HhVx9+cwVW7cYfGJDzc1HlnLpQ0zen28bcgj5wIqzjsjvnU/ArdNUVSjk\naXWxG7s0+FQyw1jzA0EV5D+GTobCoJIrp6gGFtyVyF8ZHJNKwuK20oCkwzyeqbAJ\n56fhUIULAgMBAAECggEAEcNoLB5QrBO5ubNKG5fffqtWnKdiRnOow480yryLBw2o\ns5K8Uf6EM8/WmtteAe1HpaW/OVbY35TfKxIEfLxzxme8cUs/sVDVYAwNchxTmtkY\ndHaSXRsEZ63eWRwBltRrBBXfYI95RIdcnusUxJvkOdBxn9sc/xamTNJ7xkWUlTA4\nrKDm7aXfpCdDMaEW8orGmUfHm4K8MtPZb6rTpH6mzQmtKuirlhdvbw7x6bEFSppf\ngue+m7RS7iJfKLf7vWDDvMr+RW73LlaccM4D7dtNtexaSq+2TdwDHcMrzB2JLp7x\nrY+3HP7WR5W1gjt2QnPVS4ug1BDLyTwwq1vEnQl1gQKBgQDl0PsQhY7Uj9fPB3CX\nUP7zs1QpN2Nd/8ytDwFSZ59l7ySpwbFzGDnWghXT2eHNZ72XsZDxG56XO94+R3rm\nHvWRBXKaSCwRPeleqBYP8kkyYqBeOLxn5PhKjlDAmbXSsHa7i2PSjXRmACHMdRgy\n6qkawkmwLa86JjsRF1jqL6Os2wKBgQDe0OnIswhtQPfeHgP8wDTQ+a3PT6QbCKLu\n8xlgz5W6wBOJieGpczwGqGsWkTRbju1ZUFybTVfR9YNfO+YVpzn7rEo+g1xuR8hk\nCYuq5b1wqckVg1oeuz8s/pcfPdMPYSg94i7d4qTISt/h/pYJjN/oASlviGzeT/c/\nE8q9TobnkQKBgGv7EkxEBMVZRNRQsZVXiENnSi8HiFfdXgUeXMekSp/xim98w+zJ\nQDvK6YieAlup18pTsz+mc5Cpn5Xxrgw8FbPrNFrLeHEtft5r6dnaRIw5DRLYY6YJ\nTqRxU/36+xSgt1kNeHyw3DUk8LyJdDJQUd5x1X/DJ2cSGYTBTJTUh3orAoGAcd8I\nq2Y710INqvliBkjgdTA00K8d6ib2xfF9NcnA9qj1EyRhLG1U7v4hhG3++Q/JYwy7\n1y6mxAmZ8xC0nLpS2rkJVHtjwIR0+BMcyuEQeMR8nL79TplZRxBxgSjidYisvTub\nwg/zMN17H48xdH4HbBUz7Okm4lKxxA3EXg0EytECgYBf2e4tJ2KM8zkya/GhelJq\n9rUlkZp8AsY7aK7zcZidOFJh56yFQ8XM4IA+8KFvi05cDan58E3sWuQg/SQlPsSR\nVPUP2v7ES06yMLuYHzana/3NhP9FcQ2seakhSFMkxZBNOFeZ1Rw4GW6eWiF8K8TA\nHwc7x0zDXInEcEl0G0XMzg==\n-----END PRIVATE KEY-----\n`;
 
 // Handle newline formatting for GCP service account private keys
-const RAW_PRIVATE_KEY = process.env.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY || 
-  `-----BEGIN PRIVATE KEY-----\nMIIEvAIBADANBgkqhkiG9w0BAQEFAASCBKYwggSiAgEAAoIBAQDIBsVjsb0/AXyh\nvPTdxyEwgm5+PYidNDies3q4GOLGfwWCLK9zBFG9q6cXIrL+NY534T952FVwrnuC\nx4CPnMocTj6uhh0ORlIHc9ZlbBsPKX4Lkc6Llcuv3nvSAYa5AaopNdDHHoTWrjxz\nDg/SSIasR5W+DZXTeGhP6dtvyOD6w5DEGLuZOE2xcd5zPE0lKOjsRs3q5J91LA7h\nCcdrY17HhVx9+cwVW7cYfGJDzc1HlnLpQ0zen28bcgj5wIqzjsjvnU/ArdNUVSjk\naXWxG7s0+FQyw1jzA0EV5D+GTobCoJIrp6gGFtyVyF8ZHJNKwuK20oCkwzyeqbAJ\n56fhUIULAgMBAAECggEAEcNoLB5QrBO5ubNKG5fffqtWnKdiRnOow480yryLBw2o\ns5K8Uf6EM8/WmtteAe1HpaW/OVbY35TfKxIEfLxzxme8cUs/sVDVYAwNchxTmtkY\ndHaSXRsEZ63eWRwBltRrBBXfYI95RIdcnusUxJvkOdBxn9sc/xamTNJ7xkWUlTA4\nrKDm7aXfpCdDMaEW8orGmUfHm4K8MtPZb6rTpH6mzQmtKuirlhdvbw7x6bEFSppf\ngue+m7RS7iJfKLf7vWDDvMr+RW73LlaccM4D7dtNtexaSq+2TdwDHcMrzB2JLp7x\nrY+3HP7WR5W1gjt2QnPVS4ug1BDLyTwwq1vEnQl1gQKBgQDl0PsQhY7Uj9fPB3CX\nUP7zs1QpN2Nd/8ytDwFSZ59l7ySpwbFzGDnWghXT2eHNZ72XsZDxG56XO94+R3rm\nHvWRBXKaSCwRPeleqBYP8kkyYqBeOLxn5PhKjlDAmbXSsHa7i2PSjXRmACHMdRgy\n6qkawkmwLa86JjsRF1jqL6Os2wKBgQDe0OnIswhtQPfeHgP8wDTQ+a3PT6QbCKLu\n8xlgz5W6wBOJieGpczwGqGsWkTRbju1ZUFybTVfR9YNfO+YVpzn7rEo+g1xuR8hk\nCYuq5b1wqckVg1oeuz8s/pcfPdMPYSg94i7d4qTISt/h/pYJjN/oASlviGzeT/c/\nE8q9TobnkQKBgGv7EkxEBMVZRNRQsZVXiENnSi8HiFfdXgUeXMekSp/xim98w+zJ\nQDvK6YieAlup18pTsz+mc5Cpn5Xxrgw8FbPrNFrLeHEtft5r6dnaRIw5DRLYY6YJ\nTqRxU/36+xSgt1kNeHyw3DUk8LyJdDJQUd5x1X/DJ2cSGYTBTJTUh3orAoGAcd8I\nq2Y710INqvliBkjgdTA00K8d6ib2xfF9NcnA9qj1EyRhLG1U7v4hhG3++Q/JYwy7\n1y6mxAmZ8xC0nLpS2rkJVHtjwIR0+BMcyuEQeMR8nL79TplZRxBxgSjidYisvTub\nwg/zMN17H48xdH4HbBUz7Okm4lKxxA3EXg0EytECgYBf2e4tJ2KM8zkya/GhelJq\n9rUlkZp8AsY7aK7zcZidOFJh56yFQ8XM4IA+8KFvi05cDan58E3sWuQg/SQlPsSR\nVPUP2v7ES06yMLuYHzana/3NhP9FcQ2seakhSFMkxZBNOFeZ1Rw4GW6eWiF8K8TA\nHwc7x0zDXInEcEl0G0XMzg==\n-----END PRIVATE KEY-----\n`;
+const RAW_PRIVATE_KEY = process.env.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY || '';
 
-const PRIVATE_KEY = RAW_PRIVATE_KEY.replace(/\\n/g, '\n');
+// Clean trim whitespace and outer quotes (which can cause decoding failures)
+let cleanKey = RAW_PRIVATE_KEY.trim();
+if (cleanKey.startsWith('"') && cleanKey.endsWith('"')) {
+  cleanKey = cleanKey.slice(1, -1);
+}
+if (cleanKey.startsWith("'") && cleanKey.endsWith("'")) {
+  cleanKey = cleanKey.slice(1, -1);
+}
+
+// Convert escaped backslash-n sequences to real newlines
+cleanKey = cleanKey.replace(/\\n/g, '\n').trim();
+
+// Runtime validation using native crypto class parser
+let isPEMValid = false;
+if (cleanKey && cleanKey.includes('-----BEGIN PRIVATE KEY-----') && cleanKey.includes('-----END PRIVATE KEY-----')) {
+  try {
+    crypto.createPrivateKey(cleanKey);
+    isPEMValid = true;
+  } catch (err: any) {
+    console.warn('⚠️ Environment private key exists but cannot be decrypted by crypto.createPrivateKey:', err.message);
+  }
+}
+
+// Align matching credentials for consistency
+const PRIVATE_KEY = isPEMValid ? cleanKey : FALLBACK_KEY;
+const CLIENT_EMAIL = isPEMValid ? (process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL || FALLBACK_EMAIL) : FALLBACK_EMAIL;
+const SPREADSHEET_ID = isPEMValid ? (process.env.GOOGLE_SPREADSHEET_ID || FALLBACK_SPREADSHEET_ID) : FALLBACK_SPREADSHEET_ID;
+
+interface SyncStatus {
+  initialized: boolean;
+  timestamp: string;
+  success: boolean;
+  error: string | null;
+}
+
+let lastSyncStatus: SyncStatus = {
+  initialized: false,
+  timestamp: '',
+  success: false,
+  error: null
+};
+
+function saveDebugLog() {
+  const debugData = {
+    rawExists: !!RAW_PRIVATE_KEY,
+    rawLength: RAW_PRIVATE_KEY ? RAW_PRIVATE_KEY.length : 0,
+    cleanLength: cleanKey.length,
+    isPEMValid,
+    isFallbackUsed: PRIVATE_KEY === FALLBACK_KEY,
+    clientEmailUsed: CLIENT_EMAIL,
+    spreadsheetIdUsed: SPREADSHEET_ID,
+    syncStatus: lastSyncStatus
+  };
+
+  console.log('🕵️ [PRIVATE_KEY_DEBUG]', debugData);
+
+  try {
+    fs.writeFileSync(new URL('./debug-log.json', import.meta.url), JSON.stringify(debugData, null, 2));
+  } catch (e: any) {
+    // Ignore filesystem errors in case of any package context
+  }
+}
+
+// Initial print and write on boot
+saveDebugLog();
 
 // Google Sheets Tab Definitions (Worksheets)
 const TABS = {
@@ -258,9 +325,23 @@ export async function initializeSpreadsheet() {
     }
     
     console.log('✅ Google Sheets Database fully initialized and synced in memory!');
+    lastSyncStatus = {
+      initialized: true,
+      timestamp: new Date().toISOString(),
+      success: true,
+      error: null
+    };
+    saveDebugLog();
   } catch (error: any) {
     console.error('❌ Failed to initialize Google Spreadsheet sync:', error.message || error);
     console.log('⚠️ Running in Local Memory fallback mode.');
+    lastSyncStatus = {
+      initialized: true,
+      timestamp: new Date().toISOString(),
+      success: false,
+      error: error.message || String(error)
+    };
+    saveDebugLog();
   }
 }
 

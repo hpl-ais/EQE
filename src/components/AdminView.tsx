@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { User } from '../types';
 import { db, addSystemNotification } from '../mockData';
 import { 
@@ -9,9 +9,10 @@ import {
 
 interface AdminViewProps {
   onDataModified: () => void;
+  tick?: number;
 }
 
-export default function AdminView({ onDataModified }: AdminViewProps) {
+export default function AdminView({ onDataModified, tick }: AdminViewProps) {
   const [activeTab, setActiveTab] = useState<'teachers' | 'students' | 'classes'>('teachers');
 
   const [teachers, setTeachers] = useState<User[]>(() => {
@@ -58,6 +59,25 @@ export default function AdminView({ onDataModified }: AdminViewProps) {
   const [editStudentFullName, setEditStudentFullName] = useState('');
   const [editStudentEmail, setEditStudentEmail] = useState('');
   const [editStudentClass, setEditStudentClass] = useState('');
+
+  // Synchronize internal state collections on external database modifications (tick updates)
+  useEffect(() => {
+    setClassList(db.getClasses());
+    setStudents(db.getUsers().filter(u => u.role === 'student'));
+    setTeachers(db.getUsers().filter(u => u.role === 'teacher'));
+  }, [tick]);
+
+  // Prevent selection/saving errors when classes sync or lists change asynchronously
+  useEffect(() => {
+    if (classList.length > 0) {
+      if (!newStudentClass || !classList.includes(newStudentClass)) {
+        setNewStudentClass(classList[0]);
+      }
+      if (editingStudentId && (!editStudentClass || !classList.includes(editStudentClass))) {
+        setEditStudentClass(classList[0]);
+      }
+    }
+  }, [classList, newStudentClass, editStudentClass, editingStudentId]);
 
   // Custom modal state for safe deletion without window.confirm
   const [pendingDeleteUser, setPendingDeleteUser] = useState<User | null>(null);
@@ -529,7 +549,12 @@ export default function AdminView({ onDataModified }: AdminViewProps) {
     setEditingStudentId(student.id);
     setEditStudentFullName(student.fullName);
     setEditStudentEmail(student.email);
-    setEditStudentClass(student.studentClass || '10A1');
+    
+    let defaultClass = student.studentClass;
+    if (!defaultClass || !classList.includes(defaultClass)) {
+      defaultClass = classList.length > 0 ? classList[0] : '10A1';
+    }
+    setEditStudentClass(defaultClass);
   };
 
   const handleSaveEditStudent = (id: string) => {
@@ -887,8 +912,16 @@ export default function AdminView({ onDataModified }: AdminViewProps) {
           <button
             type="button"
             onClick={() => {
-              setShowAddStudentForm(!showAddStudentForm);
+              const nextState = !showAddStudentForm;
+              setShowAddStudentForm(nextState);
               if (showImportPanel) setShowImportPanel(false);
+              if (nextState) {
+                if (selectedClass && selectedClass !== 'Tất cả' && classList.includes(selectedClass)) {
+                  setNewStudentClass(selectedClass);
+                } else if (classList.length > 0 && (!newStudentClass || !classList.includes(newStudentClass))) {
+                  setNewStudentClass(classList[0]);
+                }
+              }
             }}
             className={`flex items-center gap-2 px-3.5 py-2 border rounded-xl font-bold text-xs transition cursor-pointer ${
               showAddStudentForm

@@ -106,10 +106,8 @@ export default function App() {
     return () => unsubscribe();
   }, []);
 
-  // Initialize and check session (Remember Login)
-  useEffect(() => {
-    initializeStorage();
-    
+  // Low-level helper: check and populate active session
+  const checkActiveSession = () => {
     // Check if secure login session token exists in localStorage or sessionStorage
     const savedUserId = localStorage.getItem('eduquest_session_user_id') || sessionStorage.getItem('eduquest_session_user_id');
     const savedExpire = localStorage.getItem('eduquest_session_expire') || sessionStorage.getItem('eduquest_session_expire');
@@ -143,8 +141,13 @@ export default function App() {
         sessionStorage.removeItem('eduquest_session_expire');
       }
     }
-    
     refreshData();
+  };
+
+  // Initialize and check session (Remember Login)
+  useEffect(() => {
+    initializeStorage();
+    checkActiveSession();
   }, []);
 
   // Sync Room Specific automated sweep settings whenever classroom code or activeRoom changes
@@ -166,9 +169,13 @@ export default function App() {
   // Google Sheets DB Sync Event Listener
   useEffect(() => {
     const handleSync = () => {
+      // Re-run the active session with fresh datasets downloaded from Google Sheets
+      checkActiveSession();
+      
       // Refresh current active user reference to reflect any cloud edits
-      if (activeUser) {
-        const freshUser = db.getUsers().find(u => u.id === activeUser.id);
+      const savedUserId = localStorage.getItem('eduquest_session_user_id') || sessionStorage.getItem('eduquest_session_user_id');
+      if (savedUserId) {
+        const freshUser = db.getUsers().find(u => u.id === savedUserId);
         if (freshUser) {
           setActiveUser(freshUser);
         }
@@ -187,7 +194,7 @@ export default function App() {
 
     window.addEventListener('eduquest_db_sync', handleSync);
     return () => window.removeEventListener('eduquest_db_sync', handleSync);
-  }, [activeUser]);
+  }, []);
 
   // Synchronous constraint: Auto focus class-appropriate workspace room for student/teacher
   useEffect(() => {
@@ -1224,7 +1231,7 @@ export default function App() {
           {/* LEFT 3 COLUMNS: MAIN WORKSPACE CHANGED BY ACTIVE VIEW STATE */}
           <div className={`${currentConsole === 'admin' ? 'xl:col-span-4' : 'xl:col-span-3'} space-y-6`}>
             {currentConsole === 'admin' ? (
-              <AdminView onDataModified={refreshData} />
+              <AdminView onDataModified={refreshData} tick={tickState} />
             ) : currentConsole === 'teacher' ? (
               <TeacherView 
                 teacherId={activeUser.id} 

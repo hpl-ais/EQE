@@ -523,9 +523,7 @@ export const db = {
     return val ? JSON.parse(val) : ['10A1', '10A2', '11A1', '11A2', '12A1', '12A2'];
   },
   setClasses: (classes: string[]) => {
-    if (typeof window !== 'undefined') {
-      localStorage.setItem(KEYS.CLASSES, JSON.stringify(classes));
-    }
+    saveData(KEYS.CLASSES, classes);
   },
   getSubjects: (): string[] => {
     if (typeof window === 'undefined') return [];
@@ -533,9 +531,7 @@ export const db = {
     return val ? JSON.parse(val) : [];
   },
   setSubjects: (subjects: string[]) => {
-    if (typeof window !== 'undefined') {
-      localStorage.setItem(KEYS.SUBJECTS, JSON.stringify(subjects));
-    }
+    saveData(KEYS.SUBJECTS, subjects);
   }
 };
 
